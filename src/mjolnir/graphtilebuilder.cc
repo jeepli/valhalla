@@ -1157,35 +1157,43 @@ void GraphTileBuilder::AddBins(const std::string& tile_dir,
                                bool build_bounding_circles) {
   assert(tile);
   // read bins and append and keep track of how much is appended
-  std::array<std::vector<GraphId>, kBinCount> bins;
-  std::array<std::vector<DiscretizedBoundingCircle>, kBinCount> circles;
+  bins_t all_bins;
+  // std::array<std::vector<GraphId>, kBinCount> bins;
+  // std::array<std::vector<DiscretizedBoundingCircle>, kBinCount> circles;
   uint32_t shift = 0;
   bool added_bounding_circles = false;
   for (size_t i = 0; i < kBinCount; ++i) {
     auto bin = tile->GetBin(i % kBinsDim, i / kBinsDim);
     auto circle_bin = tile->GetBoundingCircles(i % kBinsDim, i / kBinsDim);
     // append existing ones
-    bins[i].assign(bin.begin(), bin.end());
+    auto bin_it = bin.begin();
+    auto circle_it = circle_bin.begin();
+    assert(build_bounding_circles ? bin.size() == circle_bin.size() : true);
 
-    if (build_bounding_circles) {
-      circles[i].assign(circle_bin.begin(), circle_bin.end());
+    while (bin_it != bin.end()) {
+      auto p =
+          std::make_pair(*bin_it, build_bounding_circles ? *circle_it : DiscretizedBoundingCircle());
+      all_bins[i].push_back(p);
+      added_bounding_circles = build_bounding_circles;
+      ++bin_it, ++circle_it;
     }
 
     // append new ones
     for (size_t j = 0; j < more_bins[i].size(); ++j) {
-      bins[i].push_back(more_bins[i][j].first);
-      if (build_bounding_circles) {
-        added_bounding_circles = true;
-        circles[i].push_back(more_bins[i][j].second);
-      }
+      added_bounding_circles = build_bounding_circles; // at least one circle was added
+      all_bins[i].push_back(more_bins[i][j]);
     }
+    // sorting within bins is easy
+    std::sort(all_bins[i].begin(), all_bins[i].end(),
+              [](auto& p1, auto& p2) { return p1.first < p2.first; });
+    // but we also need to sort the circles in the same order... how?
     shift += more_bins[i].size();
   }
   shift *= (sizeof(GraphId) + (build_bounding_circles ? sizeof(DiscretizedBoundingCircle) : 0));
   // update header bin indices
-  uint32_t offsets[kBinCount] = {static_cast<uint32_t>(bins[0].size())};
+  uint32_t offsets[kBinCount] = {static_cast<uint32_t>(all_bins[0].size())};
   for (size_t i = 1; i < kBinCount; ++i) {
-    offsets[i] = static_cast<uint32_t>(bins[i].size()) + offsets[i - 1];
+    offsets[i] = static_cast<uint32_t>(all_bins[i].size()) + offsets[i - 1];
   }
   // update header offsets
   // NOTE: if format changes to add more things here we need to make a change here as well
@@ -1205,16 +1213,20 @@ void GraphTileBuilder::AddBins(const std::string& tile_dir,
   const auto* end = reinterpret_cast<const char*>(tile->GetBin(0, 0).begin());
   in_mem.write(begin, end - begin);
   // the updated bins
-  for (const auto& bin : bins) {
-    in_mem.write(reinterpret_cast<const char*>(bin.data()), bin.size() * sizeof(GraphId));
+  for (const auto& bins : all_bins) {
+    for (const auto& bin : bins)
+      in_mem.write(reinterpret_cast<const char*>(&bin.first), sizeof(GraphId));
   }
   header.set_bounding_circle_offset(
       added_bounding_circles ? (sizeof(GraphTileHeader) + in_mem.tellp()) : 0);
 
   // the updated bounding circles
-  for (const auto& circle : circles) {
-    in_mem.write(reinterpret_cast<const char*>(circle.data()),
-                 circle.size() * sizeof(DiscretizedBoundingCircle));
+  if (added_bounding_circles) {
+    for (const auto& circles : all_bins) {
+      for (const auto& circle : circles)
+        in_mem.write(reinterpret_cast<const char*>(&circle.second),
+                     sizeof(DiscretizedBoundingCircle));
+    }
   }
   // the rest of the stuff after circles if it had any
   if (tile->header()->has_bounding_circles()) {

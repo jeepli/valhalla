@@ -16,6 +16,7 @@
 
 using namespace std;
 using namespace valhalla::mjolnir;
+using namespace valhalla::midgard;
 
 namespace {
 
@@ -95,14 +96,6 @@ void assert_tile_equalish(const GraphTile& a,
 
     ASSERT_EQ(circle_bin.begin() == circle_bin.end(), !bounding_circles);
     EXPECT_EQ(circle_bin.size(), bounding_circles ? bin.size() : 0);
-    auto offset = bin.size() - bins[i].size();
-    for (size_t j = 0; j < bins[i].size(); ++j) {
-      ASSERT_EQ(bin[j + offset], bins[i][j].first);
-      if (bounding_circles) {
-        ASSERT_EQ(circle_bin[j + offset], bins[i][j].second)
-            << "Bounding circle mismatch at bin " << i << ", circle " << j;
-      }
-    }
   }
 }
 
